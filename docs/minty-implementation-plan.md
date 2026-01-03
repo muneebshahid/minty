@@ -2,8 +2,8 @@
 
 **Stack:** Node + npm + TypeScript + tsx + commander + Playwright + better-sqlite3 + drizzle + AI SDK + zod + ora + chalk + vitest  
 **Mode:** self-hosted, local-first, **single-profile** SQLite database  
-**MVP focus:** Human-assisted browser session → capture (screenshots + DOM + optional downloads) → **LLM extraction to canonical transactions** → LLM categorize → LLM subscription detection → CLI reports  
-**Safety:** “read-only” automation (Minty does not click/submit beyond what the user does; it only captures + parses)  
+**MVP focus:** Human-assisted login → **restrained Playwright UI driving** → capture (screenshots + DOM + optional downloads) → **LLM extraction to canonical transactions** → LLM categorize → LLM subscription detection → CLI reports  
+**Safety:** “read-only” automation (Minty may navigate/click/scroll to reach & paginate transaction views, but must avoid any money-moving or account-changing flows)
 
 ---
 
@@ -74,7 +74,7 @@ Creates:
 - `minty accounts list`
 - `minty accounts remove --name "N26"` or `--id <uuid>`
 
-### Web ingest (generic, human-assisted)
+### Web ingest (generic, restrained UI driving)
 
 Single “do the thing” command:
 
@@ -91,12 +91,11 @@ Implementation behavior:
 
 1. Open Playwright with persistent profile under `~/.minty/browser/`
 2. Print instructions:
-   - “Log in and navigate to the transactions page”
-   - “Press Enter to capture”
-3. Capture artifacts:
-   - screenshot (png)
-   - HTML snapshot (page.content)
-   - URL + title + timestamp
+   - “Log in (human-assisted), then Minty will take over to collect history”
+   - “Press Enter to start; Ctrl+C to stop”
+3. Drive + capture:
+   - Minty uses a bounded loop (max steps/time) to navigate/paginate/scroll and collect transaction history views.
+   - Minty captures a screenshot + HTML snapshot + URL/title after each step.
 4. Run LLM extraction to canonical JSON transactions
 5. Insert into DB with dedupe
 6. Print summary: inserted/skipped, plus where artifacts were stored
@@ -178,6 +177,7 @@ Keep existing ledger tables, add a minimal capture lineage.
 ### Tables (new, MVP)
 
 #### `captures`
+
 - `id` (text pk)
 - `accountId` (text fk)
 - `kind` (text: `"screenshot+dom"` | `"download"` | `"mixed"`)
@@ -187,6 +187,7 @@ Keep existing ledger tables, add a minimal capture lineage.
 - `createdAt` (integer ms)
 
 #### `extractions`
+
 - `id` (text pk)
 - `captureId` (text fk)
 - `model` (text)
@@ -196,6 +197,7 @@ Keep existing ledger tables, add a minimal capture lineage.
 - `createdAt` (integer ms)
 
 Optional (nice-to-have):
+
 - store the extracted JSON in DB for reproducibility
 
 ---
@@ -222,6 +224,7 @@ Support OpenAI as an alternative (config switch).
 All LLM calls must return strict JSON validated with zod:
 
 **Extraction output:**
+
 ```json
 {
   "transactions": [
@@ -237,15 +240,22 @@ All LLM calls must return strict JSON validated with zod:
 ```
 
 **Categorization output:**
+
 ```json
 { "category": "Groceries", "confidence": 0.0, "reason": "…" }
 ```
 
 **Subscription detection output:**
+
 ```json
 {
   "subscriptions": [
-    { "merchant": "NETFLIX", "period": "monthly", "confidence": 0.9, "avgAmount": 1299 }
+    {
+      "merchant": "NETFLIX",
+      "period": "monthly",
+      "confidence": 0.9,
+      "avgAmount": 1299
+    }
   ]
 }
 ```
@@ -259,20 +269,37 @@ To keep behavior stable and costs down:
 
 ---
 
-## 6) Browser safety (read-only automation)
+## 6) Browser safety (restrained UI driving)
 
-MVP rule: Minty does not attempt to “drive” the bank UI.
+MVP rule: Minty may drive navigation within the site, but must remain “read-only”.
 
-- Minty opens a browser and waits for user to navigate.
-- Minty only:
-  - captures artifacts
-  - optionally triggers “download” only if user explicitly confirms (future)
+### Hard constraints
 
-Hard safety measures (MVP):
+- **No form filling after login** (no typing into inputs; no password/OTP handling).
+- **No submissions**: do not click elements that submit forms or confirm actions.
+- **No money movement**: block interactions likely to transfer/send/pay or change settings.
 
-- Allowlist to current origin(s) once session starts (warn on cross-origin navigation)
-- No auto-clicking of buttons/links
-- No form submissions initiated by Minty
+### Action allowlist (post-login)
+
+Allowed actions are limited to:
+
+- scroll within the page
+- click navigation tabs/links that look like “Activity”, “Transactions”, “Statements”
+- click pagination controls (next/previous page)
+- expand/collapse transaction row details
+- (future) open “Export/Download statement” only if explicitly enabled
+
+### Text/role-based blocklist
+
+Deny clicks on elements whose accessible name contains (case-insensitive):
+
+`transfer`, `send`, `pay`, `withdraw`, `deposit`, `top up`, `chargeback`, `confirm`, `submit`, `save`, `settings`, `beneficiary`
+
+### Guardrails
+
+- Allowlist origins: warn/stop on cross-origin navigation once logged in.
+- Step limit + time limit per ingest run.
+- Full action log (what Minty clicked, where, why) persisted alongside captures.
 
 ---
 
@@ -295,41 +322,51 @@ Same as original plan (month totals, uncategorized, merchants, subscriptions).
 ## 9) Implementation milestones (agent-executable)
 
 ### Milestone 1 — Project scaffolding (done)
+
 - TS project + commander CLI entry
 - basic DB + migrations + init
 
-### Milestone 2 — Browser harness
+### Milestone 2 — Browser harness (restrained driving)
+
 - Add Playwright dependency
 - `minty ingest web` opens persistent profile under `~/.minty/browser/`
-- user presses Enter to capture
+- user completes login (human-assisted), then Minty runs a bounded “navigate → paginate/scroll → capture” loop
 
 Acceptance:
+
 - Browser opens and artifacts are saved under `~/.minty/captures/...`
 
 ### Milestone 3 — LLM extraction
+
 - AI SDK wiring (provider config)
 - send screenshot + DOM to LLM
 - zod-validate extracted canonical transactions
 
 Acceptance:
+
 - extraction produces valid JSON for at least one captured page
 
 ### Milestone 4 — Web ingest to DB
+
 - create ingest_run with sourceType `"web"`
 - insert extracted transactions with dedupe
 
 Acceptance:
+
 - ingesting the same capture twice yields 0 new transactions
 
 ### Milestone 5 — LLM categorization
+
 - `minty classify` calls LLM for uncategorized txns
 - cache by normalizedMerchant
 
 ### Milestone 6 — LLM subscription detection
+
 - `minty subscriptions detect` calls LLM with recent txn history grouped by merchant
 - store results in `subscriptions`
 
 ### Milestone 7 — Reports
+
 - month/uncategorized/merchants/subscriptions outputs
 
 ---
@@ -349,4 +386,3 @@ Acceptance:
 - [ ] LLM extraction + DB ingest
 - [ ] LLM categorize + subscriptions + reports
 - [ ] tests passing
-
