@@ -38,11 +38,12 @@ export function readConfigOrDefault(configPath: string): MintyConfig {
     const raw = JSON.parse(fs.readFileSync(configPath, "utf8")) as unknown;
     return mintyConfigSchema.parse(raw);
   } catch (error) {
-    throw new MintyError(`Failed to read config at ${configPath}`, { cause: error });
+    throw new MintyError(`Failed to read config at ${configPath}`, {
+      cause: error,
+    });
   }
 }
 
 export function writeConfig(configPath: string, config: MintyConfig) {
   fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
-

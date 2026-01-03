@@ -18,4 +18,3 @@ try {
 } finally {
   sqlite.close();
 }
-

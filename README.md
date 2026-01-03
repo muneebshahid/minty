@@ -8,14 +8,16 @@ Early MVP scaffolding. Implemented today:
 
 - CLI skeleton (commands wired, most are stubs)
 - SQLite schema + lightweight migrations
-- User initialization: `minty init --user <name>`
+- Profile initialization: `minty init`
 
 ## Install (local dev)
 
-Prereqs: Node.js 20+ recommended.
+Prereqs: Node.js 22.x (required for `better-sqlite3`).
 
 ```sh
 cd minty
+nvm install
+nvm use
 npm i
 ```
 
@@ -24,7 +26,7 @@ npm i
 ```sh
 npm link
 minty --help
-minty init --user muneeb
+minty init
 ```
 
 To uninstall the linked binary:
@@ -37,22 +39,23 @@ npm unlink
 
 ```sh
 npm run minty -- --help
-npm run minty -- init --user muneeb
+npm run minty -- init
 ```
 
 ## Data location
 
 Minty stores everything locally under:
 
-- `~/.minty/users/<name>/ledger.sqlite`
-- `~/.minty/users/<name>/config.json`
-- `~/.minty/users/<name>/rules.json`
+- `~/.minty/ledger.sqlite`
+- `~/.minty/config.json`
+- `~/.minty/rules.json`
 
 ## Commands (planned MVP surface)
 
 Currently implemented:
 
-- `minty init --user <name>`
+- `minty init`
+- `minty accounts add|list|remove`
 
 Scaffolded (not implemented yet):
 
@@ -69,6 +72,8 @@ Scaffolded (not implemented yet):
 
 ```sh
 npm run dev -- --help
+npm run lint
+npm run format
 npm test
 ```
 

@@ -1,22 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { assertValidUserName, userDbPath } from "../src/core/config/paths.js";
+import {
+  mintyHomeDir,
+  profileDbPath,
+  profileConfigPath,
+  profileRulesPath,
+} from "../src/core/config/paths.js";
 
 describe("paths", () => {
-  it("rejects empty user names", () => {
-    expect(() => assertValidUserName("")).toThrow();
-    expect(() => assertValidUserName("   ")).toThrow();
-  });
-
-  it("rejects path traversal", () => {
-    expect(() => assertValidUserName("..")).toThrow();
-    expect(() => assertValidUserName("../x")).toThrow();
-    expect(() => assertValidUserName("x/..")).toThrow();
-  });
-
-  it("returns a deterministic db path", () => {
-    const userName = assertValidUserName("muneeb");
-    expect(userDbPath(userName)).toContain(".minty");
-    expect(userDbPath(userName)).toContain("ledger.sqlite");
+  it("returns deterministic profile paths", () => {
+    expect(mintyHomeDir()).toContain(".minty");
+    expect(profileDbPath()).toContain("ledger.sqlite");
+    expect(profileConfigPath()).toContain("config.json");
+    expect(profileRulesPath()).toContain("rules.json");
   });
 });
-

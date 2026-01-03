@@ -2,7 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { readConfigOrDefault, writeConfig } from "../src/core/config/loadConfig.js";
+import {
+  readConfigOrDefault,
+  writeConfig,
+} from "../src/core/config/loadConfig.js";
 
 describe("config", () => {
   it("writes and reads defaults", () => {
@@ -18,4 +21,3 @@ describe("config", () => {
     expect(readBack.privacy.sendRawDescriptionToLLM).toBe(false);
   });
 });
-

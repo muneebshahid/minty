@@ -14,4 +14,3 @@ export class MintyError extends Error {
     this.code = opts.code;
   }
 }
-

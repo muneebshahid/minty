@@ -6,7 +6,6 @@ export function registerExportCommand(program: Command) {
   exportCmd
     .command("csv")
     .description("Export as CSV")
-    .requiredOption("--user <name>", "user profile name")
     .requiredOption("--out <path>", "output file path")
     .action(async () => {
       throw new Error("Not implemented yet");
@@ -15,10 +14,8 @@ export function registerExportCommand(program: Command) {
   exportCmd
     .command("json")
     .description("Export as JSON")
-    .requiredOption("--user <name>", "user profile name")
     .requiredOption("--out <path>", "output file path")
     .action(async () => {
       throw new Error("Not implemented yet");
     });
 }
-

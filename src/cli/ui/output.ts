@@ -8,4 +8,3 @@ export function printError(error: MintyError, opts: { showStack: boolean }) {
     process.stderr.write(`${error.cause.stack}\n`);
   }
 }
-

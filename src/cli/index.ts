@@ -38,10 +38,15 @@ try {
   const opts = program.opts<{ debug?: boolean }>();
   const showStack = Boolean(opts.debug);
   if (error instanceof CommanderError) {
-    if (error.code === "commander.helpDisplayed" || error.code === "commander.version") {
+    if (
+      error.code === "commander.helpDisplayed" ||
+      error.code === "commander.version"
+    ) {
       process.exitCode = 0;
     } else {
-      printError(new MintyError(error.message, { cause: error }), { showStack });
+      printError(new MintyError(error.message, { cause: error }), {
+        showStack,
+      });
       process.exitCode = error.exitCode ?? 1;
     }
   } else {

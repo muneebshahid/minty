@@ -1,4 +1,10 @@
-import { integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  integer,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 export const users = sqliteTable(
   "users",
@@ -9,7 +15,7 @@ export const users = sqliteTable(
   },
   (table) => ({
     nameUnique: uniqueIndex("users_name_unique").on(table.name),
-  }),
+  })
 );
 
 export const accounts = sqliteTable(
@@ -22,8 +28,11 @@ export const accounts = sqliteTable(
     createdAt: integer("createdAt").notNull(),
   },
   (table) => ({
-    userNameUnique: uniqueIndex("accounts_user_name_unique").on(table.userId, table.name),
-  }),
+    userNameUnique: uniqueIndex("accounts_user_name_unique").on(
+      table.userId,
+      table.name
+    ),
+  })
 );
 
 export const ingestRuns = sqliteTable("ingest_runs", {
@@ -57,8 +66,11 @@ export const transactions = sqliteTable(
     createdAt: integer("createdAt").notNull(),
   },
   (table) => ({
-    accountHashUnique: uniqueIndex("transactions_account_hash_unique").on(table.accountId, table.hash),
-  }),
+    accountHashUnique: uniqueIndex("transactions_account_hash_unique").on(
+      table.accountId,
+      table.hash
+    ),
+  })
 );
 
 export const rules = sqliteTable("rules", {
@@ -87,11 +99,8 @@ export const subscriptions = sqliteTable(
     updatedAt: integer("updatedAt").notNull(),
   },
   (table) => ({
-    userMerchantCurrencyUnique: uniqueIndex("subscriptions_user_merchant_currency_unique").on(
-      table.userId,
-      table.normalizedMerchant,
-      table.currency,
-    ),
-  }),
+    userMerchantCurrencyUnique: uniqueIndex(
+      "subscriptions_user_merchant_currency_unique"
+    ).on(table.userId, table.normalizedMerchant, table.currency),
+  })
 );
-
