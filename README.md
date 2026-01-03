@@ -16,4 +16,3 @@ Local-first personal finance ledger (CLI-first).
 ## Init
 
 - `npm run dev -- init --user muneeb`
-
