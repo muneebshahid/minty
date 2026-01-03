@@ -1,0 +1,33 @@
+{
+  "name": "minty",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "minty": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli/index.ts",
+    "build": "tsup src/cli/index.ts --format esm --dts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate": "tsx src/core/db/migrate.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.0",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "drizzle-orm": "^0.38.4",
+    "ora": "^8.0.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
+    "tsup": "^8.2.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
+
