@@ -1,7 +1,7 @@
 # Minty (working title) — Implementation Plan (CLI-first personal finance ledger)
 
 **Stack:** Node + npm + TypeScript + tsx + commander + better-sqlite3 + drizzle + AI SDK + zod + ora + chalk + vitest  
-**Mode:** self-hosted, local-first, per-user SQLite database  
+**Mode:** self-hosted, local-first, single-profile SQLite database (MVP)  
 **MVP focus:** CSV/manual ingest → normalize → categorize (rules + optional LLM) → subscription detection → CLI reports  
 **Explicitly postponed:** Playwright ingestion + auto-cancellation (design for it, don’t build it yet)
 
@@ -11,16 +11,16 @@
 
 People want a clear view of where their money goes across accounts. The hardest parts are:
 
-- inconsistent merchant strings and noisy descriptions  
-- categorization that users can trust and correct  
-- identifying recurring charges (“subscriptions”) and spending drift  
+- inconsistent merchant strings and noisy descriptions
+- categorization that users can trust and correct
+- identifying recurring charges (“subscriptions”) and spending drift
 
 This project aims to be:
 
-- **local-first** (data stays on device)  
-- **automation-friendly** (CLI, scriptable)  
-- **explainable** (show why a transaction was categorized)  
-- **extensible** (importers as plugins; later add Playwright)  
+- **local-first** (data stays on device)
+- **automation-friendly** (CLI, scriptable)
+- **explainable** (show why a transaction was categorized)
+- **extensible** (importers as plugins; later add Playwright)
 
 ---
 
@@ -54,43 +54,43 @@ This project aims to be:
 
 ### Initialize
 
-- `minty init --user <name>`
+- `minty init`
 
 Creates:
 
-- `~/.minty/users/<name>/ledger.sqlite`
-- `~/.minty/users/<name>/rules.json`
-- `~/.minty/users/<name>/config.json`
+- `~/.minty/ledger.sqlite`
+- `~/.minty/rules.json`
+- `~/.minty/config.json`
 
 ### Accounts (metadata only for now)
 
-- `minty accounts add --user <name> --name "N26" --currency EUR`
-- `minty accounts list --user <name>`
-- `minty accounts remove --user <name> --name "N26"`
+- `minty accounts add --name "N26" --currency EUR`
+- `minty accounts list`
+- `minty accounts remove --name "N26"`
 
 ### Ingest
 
-- `minty ingest csv --user <name> --account "N26" --file ./statement.csv [--format auto|n26|wise|generic]`
-- `minty ingest json --user <name> --account "N26" --file ./txns.json`
+- `minty ingest csv --account "N26" --file ./statement.csv`
+- `minty ingest json --account "N26" --file ./txns.json`
 
 ### Categorize
 
-- `minty classify --user <name> [--since YYYY-MM-DD] [--dry-run]`
-- `minty rules add --user <name> --match contains --pattern "REWE" --category Groceries [--merchant "REWE"]`
-- `minty txn set-category --user <name> --id <txnId> --category "Dining" [--learn-rule]`
+- `minty classify [--since YYYY-MM-DD] [--dry-run]`
+- `minty rules add --match contains --pattern "REWE" --category Groceries [--merchant "REWE"]`
+- `minty txn set-category --id <txnId> --category "Dining" [--learn-rule]`
 
 ### Reports
 
-- `minty report month --user <name> --month 2026-01`
-- `minty report uncategorized --user <name> [--limit 50]`
-- `minty report merchants --user <name> --month 2026-01 [--top 20]`
-- `minty subscriptions detect --user <name>`
-- `minty subscriptions upcoming --user <name> --days 60`
+- `minty report month --month 2026-01`
+- `minty report uncategorized [--limit 50]`
+- `minty report merchants --month 2026-01 [--top 20]`
+- `minty subscriptions detect`
+- `minty subscriptions upcoming --days 60`
 
 ### Export (optional but useful for adoption)
 
-- `minty export csv --user <name> --out ./ledger.csv`
-- `minty export json --user <name> --out ./ledger.json`
+- `minty export csv --out ./ledger.csv`
+- `minty export json --out ./ledger.json`
 
 ---
 
@@ -108,8 +108,7 @@ minty/
       commands/
         init.ts
         accounts.ts
-        ingestCsv.ts
-        ingestJson.ts
+        ingest.ts
         classify.ts
         rules.ts
         txn.ts
@@ -132,11 +131,7 @@ minty/
       ingest/
         csv/
           parseCsv.ts
-          formats/
-            generic.ts
-            n26.ts
-            wise.ts
-          detectFormat.ts
+          mapping.ts
         json/
           parseJson.ts
         dedupe.ts
@@ -178,11 +173,13 @@ Use Drizzle SQLite schema. Keep it explicit and migration-friendly.
 ### Tables
 
 #### `users`
+
 - `id` (text, primary key)
 - `name` (text, unique)
 - `createdAt` (integer ms)
 
 #### `accounts`
+
 - `id` (text pk)
 - `userId` (text fk)
 - `name` (text)
@@ -191,6 +188,7 @@ Use Drizzle SQLite schema. Keep it explicit and migration-friendly.
 - unique(userId, name)
 
 #### `ingest_runs`
+
 - `id` (text pk)
 - `userId` (text fk)
 - `accountId` (text fk)
@@ -201,6 +199,7 @@ Use Drizzle SQLite schema. Keep it explicit and migration-friendly.
 - `error` (text nullable)
 
 #### `transactions`
+
 - `id` (text pk)
 - `userId` (text fk)
 - `accountId` (text fk)
@@ -217,10 +216,12 @@ Use Drizzle SQLite schema. Keep it explicit and migration-friendly.
 - `createdAt` (integer ms)
 
 Indexes/constraints:
+
 - unique(accountId, externalId) where externalId is not null
 - unique(accountId, hash)
 
 #### `rules`
+
 - `id` (text pk)
 - `userId` (text fk)
 - `matchType` (text: "contains" | "equals" | "regex")
@@ -231,6 +232,7 @@ Indexes/constraints:
 - `createdAt` (integer ms)
 
 #### `subscriptions`
+
 - `id` (text pk)
 - `userId` (text fk)
 - `normalizedMerchant` (text)
@@ -243,6 +245,7 @@ Indexes/constraints:
 - `updatedAt` (integer ms)
 
 Unique:
+
 - unique(userId, normalizedMerchant, currency)
 
 ---
@@ -251,7 +254,7 @@ Unique:
 
 ### `config.json` (per user)
 
-Path: `~/.minty/users/<name>/config.json`
+Path: `~/.minty/config.json`
 
 Zod schema fields:
 
@@ -270,7 +273,7 @@ Zod schema fields:
 ### Rules storage approach (MVP decision)
 
 - **DB is source of truth** for rules.
-- Optional command `minty rules export --user <name> --out rules.json` for sharing.
+- Optional command `minty rules export --out rules.json` for sharing.
 
 ---
 
@@ -280,13 +283,14 @@ Zod schema fields:
 
 Support:
 
-- `--format generic` (user maps columns by flags)
-- `--format auto` (try detect based on headers)
-- `--format n26|wise` (known mappings later)
+- Generic CSV import (header-based)
+- Auto-mapping by common header names
+- Explicit column mapping via flags (fallback when headers are non-standard)
 
 ### Column mapping (canonical)
 
 Map any CSV to:
+
 - `postedAt`
 - `amount`
 - `currency` (optional; fallback to account currency)
@@ -300,6 +304,7 @@ Compute stable `hash` if externalId missing:
 - `hash = sha256("${postedAt}|${amount}|${currency}|${normalizedRawDesc}|${accountId}")`
 
 Where `normalizedRawDesc` is:
+
 - trimmed
 - whitespace collapsed
 - optionally uppercased
@@ -334,6 +339,7 @@ Keep it conservative for MVP.
 ## 8) Categorization design
 
 ### Categories (defaults)
+
 Groceries, Dining, Transport, Utilities, Rent, Subscriptions, Shopping, Health, Travel, Entertainment, Income, Fees, Transfers, Other, Uncategorized
 
 ### Rules-first
@@ -345,6 +351,7 @@ Groceries, Dining, Transport, Utilities, Rent, Subscriptions, Shopping, Health, 
   - `regex`: regex against rawDescription
 
 If rule matches:
+
 - set category
 - confidence = 1.0
 - source = `rule`
@@ -355,6 +362,7 @@ If rule matches:
 Only for remaining Uncategorized:
 
 Prompt must:
+
 - constrain output to known categories
 - require JSON output:
   - `{ "category": "...", "confidence": 0-1, "reason": "short" }`
@@ -377,36 +385,44 @@ Cache by normalizedMerchant (and optionally amount band).
 ## 9) Subscription detection (MVP)
 
 ### Inputs
+
 Expense transactions only (amount < 0).
 
 Group by:
+
 - (userId, normalizedMerchant, currency)
 
 Require:
+
 - ≥ 3 occurrences
 
 Compute:
+
 - sorted dates
 - deltas between consecutive occurrences (days)
 - median delta
 
 Classify:
+
 - weekly if median in [5..9]
 - monthly if median in [25..35]
 - annual if median in [330..400]
 - else unknown
 
 Amount stability:
+
 - coefficient of variation (stddev / mean) on absolute amounts
 - stable if cv ≤ 0.15
 
 Confidence:
+
 - +0.4 if period known
 - +0.3 if stable
 - +0.3 if occurrences ≥ 4
-Clamp to 0..1
+  Clamp to 0..1
 
 Next expected:
+
 - if period known: lastSeenAt + (7/30/365)
 - else null
 
@@ -417,25 +433,32 @@ Upsert into subscriptions table.
 ## 10) Reporting (MVP)
 
 ### Month report
+
 Input: `--month YYYY-MM`
 
 Compute:
+
 - total expenses (sum of negative amounts)
 - total income (sum of positive amounts)
 - totals by category
 - top merchants by spend
 
 Output:
+
 - Chalk headings
 - Simple column formatter (padEnd)
 - Money formatted from minor units
 
 ### Uncategorized report
+
 List:
+
 - id, date, merchant, amount, rawDescription snippet
 
 ### Subscriptions report
+
 List:
+
 - merchant, period, avg amount, next expected, confidence
 
 ---
@@ -443,6 +466,7 @@ List:
 ## 11) Tooling & scripts (package.json)
 
 Minimum scripts:
+
 - `dev`: `tsx src/cli/index.ts`
 - `build`: `tsup src/cli/index.ts --format esm --dts`
 - `test`: `vitest run`
@@ -450,6 +474,7 @@ Minimum scripts:
 - `db:migrate`: `tsx src/core/db/migrate.ts`
 
 Drizzle migrations:
+
 - Use drizzle-kit (dev dependency) and document the flow.
 
 ---
@@ -457,6 +482,7 @@ Drizzle migrations:
 ## 12) Implementation milestones (agent-executable)
 
 ### Milestone 1 — Project scaffolding
+
 - [ ] TS project + tsconfig
 - [ ] commander CLI entry `minty`
 - [ ] `minty --help` shows commands
@@ -464,54 +490,66 @@ Drizzle migrations:
 - [ ] vitest setup
 
 Acceptance:
+
 - `npm run dev -- --help` works.
 
 ### Milestone 2 — DB layer
-- [ ] Path helpers (`~/.minty/users/<user>`)
+
+- [ ] Path helpers (`~/.minty/`)
 - [ ] drizzle + better-sqlite3 client init
 - [ ] schema + migrations + migrate runner
-- [ ] `minty init --user <name>` creates user + db + config
+- [ ] `minty init` creates `~/.minty` profile
 
 Acceptance:
+
 - init is idempotent.
 
 ### Milestone 3 — Accounts
+
 - [ ] accounts CRUD
 - [ ] add/list/remove commands
 
 ### Milestone 4 — CSV ingest
+
 - [ ] CSV parser with delimiter detection
 - [ ] format detection + mapping (auto + generic)
 - [ ] normalization + dedupe + inserts
 - [ ] ingest run tracking
 
 Acceptance:
+
 - importing same file twice adds 0 on second run.
 
 ### Milestone 5 — Rules + classify
+
 - [ ] rules CRUD
 - [ ] rules engine
 - [ ] classify orchestrator (rules-first)
 - [ ] `minty classify`
 
 Acceptance:
+
 - added rules change output.
 
 ### Milestone 6 — LLM categorizer
+
 - [ ] config zod + env reading
 - [ ] AI SDK provider selection
 - [ ] response validation + caching
 - [ ] `minty classify` uses LLM when enabled
 
 Acceptance:
+
 - without LLM enabled, still works.
 
 ### Milestone 7 — Subscriptions
+
 - [ ] detect algorithm
 - [ ] upsert subscriptions
 - [ ] detect + upcoming commands
 
 ### Milestone 8 — Reports
+
 - [ ] month report
 - [ ] uncategorized report
 - [ ] merchants report
@@ -521,6 +559,7 @@ Acceptance:
 ## 13) Testing plan (vitest)
 
 Unit tests:
+
 - normalization
 - CSV parsing quirks
 - dedupe hash stability
@@ -529,6 +568,7 @@ Unit tests:
 - month aggregation math
 
 Integration test:
+
 - fixture CSV → ingest → classify with rules → subscriptions detect → month totals
 
 Use fixtures under `test/fixtures`.
@@ -549,7 +589,7 @@ Use fixtures under `test/fixtures`.
 - Store everything locally.
 - LLM is BYO key; read key from env only.
 - Default privacy: do NOT send rawDescription to LLM unless user enables it.
-- Optional future: `minty user delete --user <name>` to wipe profile.
+- Optional future: `minty profile reset` to wipe local data.
 
 ---
 
@@ -560,10 +600,12 @@ Define an importer interface now:
 - `Importer.ingest(ctx): Promise<IngestResult>`
 
 MVP importers:
+
 - CSV
 - JSON
 
 Later:
+
 - Playwright exporter:
   - persistent browser profile per user
   - human-in-the-loop auth pause/resume

@@ -56,11 +56,12 @@ Currently implemented:
 
 - `minty init`
 - `minty accounts add|list|remove`
+- `minty ingest csv --account <name> --file <path> [--date-col ...] [--amount-col ...] [--description-col ...]`
 
 Scaffolded (not implemented yet):
 
 - `minty accounts add|list|remove ...`
-- `minty ingest csv|json ...`
+- `minty ingest json ...`
 - `minty classify ...`
 - `minty rules add|export ...`
 - `minty txn set-category ...`

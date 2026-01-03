@@ -6,6 +6,36 @@ import { MintyError } from "../../shared/errors.js";
 
 export type AccountRow = typeof accounts.$inferSelect;
 
+export async function getAccountByName(
+  ctx: MintyContext,
+  name: string
+): Promise<AccountRow | null> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new MintyError("Account name is required");
+  return (
+    ctx.db
+      .select()
+      .from(accounts)
+      .where(and(eq(accounts.userId, ctx.userId), eq(accounts.name, trimmed)))
+      .get() ?? null
+  );
+}
+
+export async function getAccountById(
+  ctx: MintyContext,
+  id: string
+): Promise<AccountRow | null> {
+  const trimmed = id.trim();
+  if (!trimmed) throw new MintyError("Account id is required");
+  return (
+    ctx.db
+      .select()
+      .from(accounts)
+      .where(and(eq(accounts.userId, ctx.userId), eq(accounts.id, trimmed)))
+      .get() ?? null
+  );
+}
+
 export async function addAccount(
   ctx: MintyContext,
   input: { name: string; currency?: string | undefined }
