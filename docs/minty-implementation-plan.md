@@ -1,9 +1,9 @@
-# Minty (working title) — Implementation Plan (CLI-first personal finance ledger)
+# Minty (working title) — Implementation Plan (Playwright-first, CLI-based personal finance ledger)
 
-**Stack:** Node + npm + TypeScript + tsx + commander + better-sqlite3 + drizzle + AI SDK + zod + ora + chalk + vitest  
-**Mode:** self-hosted, local-first, single-profile SQLite database (MVP)  
-**MVP focus:** CSV/manual ingest → normalize → categorize (rules + optional LLM) → subscription detection → CLI reports  
-**Explicitly postponed:** Playwright ingestion + auto-cancellation (design for it, don’t build it yet)
+**Stack:** Node + npm + TypeScript + tsx + commander + Playwright + better-sqlite3 + drizzle + AI SDK + zod + ora + chalk + vitest  
+**Mode:** self-hosted, local-first, **single-profile** SQLite database  
+**MVP focus:** Human-assisted browser session → capture (screenshots + DOM + optional downloads) → **LLM extraction to canonical transactions** → LLM categorize → LLM subscription detection → CLI reports  
+**Safety:** “read-only” automation (Minty does not click/submit beyond what the user does; it only captures + parses)  
 
 ---
 
@@ -12,15 +12,16 @@
 People want a clear view of where their money goes across accounts. The hardest parts are:
 
 - inconsistent merchant strings and noisy descriptions
+- getting data out of bank UIs reliably
 - categorization that users can trust and correct
 - identifying recurring charges (“subscriptions”) and spending drift
 
 This project aims to be:
 
-- **local-first** (data stays on device)
+- **local-first** (data stays on device; artifacts stored locally)
 - **automation-friendly** (CLI, scriptable)
-- **explainable** (show why a transaction was categorized)
-- **extensible** (importers as plugins; later add Playwright)
+- **generic** (works across many sites with human-in-the-loop navigation)
+- **extensible** (connectors later, but MVP is generic capture)
 
 ---
 
@@ -28,14 +29,16 @@ This project aims to be:
 
 ### Must ship
 
-1. Initialize a user profile (local directories + sqlite)
-2. Import transactions from CSV (and a generic JSON import format)
-3. Normalize merchant strings deterministically
-4. Categorize using:
-   - rules-first (user-editable)
-   - optional LLM fallback via AI SDK (BYO API key)
-   - manual corrections that become rules
-5. Detect recurring charges and generate a “subscriptions” list
+1. Initialize local profile (directories + sqlite)
+2. Add/list/remove accounts (metadata)
+3. **Ingest from the web (generic):**
+   - open a persistent Playwright browser profile
+   - user logs in + navigates to transactions page
+   - Minty captures artifacts (screenshot(s) + DOM snapshot + URL/title; optionally detects downloads)
+   - Minty sends artifacts through an LLM to extract canonical transactions
+   - Minty stores extracted transactions and dedupes
+4. Categorize using LLM (and cache decisions)
+5. Detect recurring charges/subscriptions using LLM over transaction history
 6. Provide basic CLI reports:
    - monthly summary (total, by category, by merchant)
    - uncategorized list
@@ -43,10 +46,11 @@ This project aims to be:
 
 ### Non-goals for MVP
 
-- Fully automated login / bypassing 2FA (we support user-assisted auth later)
-- Fully generic “works on every bank website” DOM scraping
+- Fully automatic login / bypassing 2FA (human-assisted)
+- Perfect “works on every bank website” DOM scraping
 - UI (no React yet)
-- No hosting / server
+- Server/hosting
+- Web search for subscriptions by default (privacy); keep the option as a later add-on
 
 ---
 
@@ -59,565 +63,290 @@ This project aims to be:
 Creates:
 
 - `~/.minty/ledger.sqlite`
-- `~/.minty/rules.json`
 - `~/.minty/config.json`
+- `~/.minty/rules.json` (reserved for future; MVP is LLM-first)
+- `~/.minty/browser/` (persistent Playwright profile)
+- `~/.minty/captures/` (artifacts for debugging + reproducibility)
 
-### Accounts (metadata only for now)
+### Accounts (metadata)
 
 - `minty accounts add --name "N26" --currency EUR`
 - `minty accounts list`
-- `minty accounts remove --name "N26"`
+- `minty accounts remove --name "N26"` or `--id <uuid>`
 
-### Ingest
+### Web ingest (generic, human-assisted)
 
-- `minty ingest csv --account "N26" --file ./statement.csv`
-- `minty ingest json --account "N26" --file ./txns.json`
+Single “do the thing” command:
 
-### Categorize
+- `minty ingest web --account "N26"`
+
+Suggested flags:
+
+- `--url <loginUrl>` (optional starting URL)
+- `--headless false` (default: false for MVP; user can see browser)
+- `--capture <fullpage|viewport>` (default: fullpage)
+- `--pages <n>` (optional: repeat capture N times with user scrolling between)
+
+Implementation behavior:
+
+1. Open Playwright with persistent profile under `~/.minty/browser/`
+2. Print instructions:
+   - “Log in and navigate to the transactions page”
+   - “Press Enter to capture”
+3. Capture artifacts:
+   - screenshot (png)
+   - HTML snapshot (page.content)
+   - URL + title + timestamp
+4. Run LLM extraction to canonical JSON transactions
+5. Insert into DB with dedupe
+6. Print summary: inserted/skipped, plus where artifacts were stored
+
+### Categorize (LLM-first)
 
 - `minty classify [--since YYYY-MM-DD] [--dry-run]`
-- `minty rules add --match contains --pattern "REWE" --category Groceries [--merchant "REWE"]`
-- `minty txn set-category --id <txnId> --category "Dining" [--learn-rule]`
+
+### Subscriptions (LLM-first)
+
+- `minty subscriptions detect`
+- `minty subscriptions upcoming --days 60`
 
 ### Reports
 
 - `minty report month --month 2026-01`
 - `minty report uncategorized [--limit 50]`
 - `minty report merchants --month 2026-01 [--top 20]`
-- `minty subscriptions detect`
-- `minty subscriptions upcoming --days 60`
-
-### Export (optional but useful for adoption)
-
-- `minty export csv --out ./ledger.csv`
-- `minty export json --out ./ledger.json`
 
 ---
 
 ## 3) Repository structure
 
-Single package first (keep it simple), but organized for later splitting:
+Keep a single package, but separate capture/extraction from ledger logic:
 
 ```
 minty/
-  package.json
-  tsconfig.json
   src/
     cli/
-      index.ts
       commands/
         init.ts
         accounts.ts
         ingest.ts
         classify.ts
-        rules.ts
-        txn.ts
         reports.ts
         subscriptions.ts
-        export.ts
-      ui/
-        output.ts
-        table.ts
-        spinner.ts
     core/
-      config/
-        paths.ts
-        loadConfig.ts
-      db/
-        client.ts
+      browser/
+        session.ts
+        capture.ts
+        safety.ts
+      extract/
+        llmExtract.ts
         schema.ts
-        migrations/
-        migrate.ts
       ingest/
-        csv/
-          parseCsv.ts
-          mapping.ts
-        json/
-          parseJson.ts
-        dedupe.ts
-      normalize/
-        merchant.ts
-        text.ts
+        web/
+          ingestWeb.ts
       categorize/
-        categories.ts
-        rulesEngine.ts
-        llmCategorizer.ts
-        classify.ts
+        llmCategorize.ts
       subscriptions/
-        detect.ts
-        predict.ts
-      reports/
-        month.ts
-        uncategorized.ts
-        merchants.ts
+        llmDetect.ts
+      db/
+      config/
     shared/
-      errors.ts
       dates.ts
       money.ts
-      logger.ts
+      errors.ts
   test/
-    fixtures/
 ```
 
 ---
 
 ## 4) Data model (SQLite via Drizzle)
 
-Use Drizzle SQLite schema. Keep it explicit and migration-friendly.
+Keep existing ledger tables, add a minimal capture lineage.
 
 ### Money representation
 
-- Store money as **minor units integer** (e.g., cents) in the DB.
-- Convert to human-readable string only at the CLI output layer.
+- Store money as **minor units integer** (e.g., cents) in DB.
 
-### Tables
+### Tables (existing)
 
-#### `users`
+- `users` (single row, name `"default"`)
+- `accounts`
+- `transactions` (deduped)
+- `ingest_runs` (sourceType includes `"web"`)
+- `subscriptions`
 
-- `id` (text, primary key)
-- `name` (text, unique)
-- `createdAt` (integer ms)
+### Tables (new, MVP)
 
-#### `accounts`
-
+#### `captures`
 - `id` (text pk)
-- `userId` (text fk)
-- `name` (text)
-- `currency` (text, nullable)
-- `createdAt` (integer ms)
-- unique(userId, name)
-
-#### `ingest_runs`
-
-- `id` (text pk)
-- `userId` (text fk)
 - `accountId` (text fk)
-- `sourceType` (text: "csv" | "json" | later "playwright")
-- `sourceMeta` (text JSON)
-- `startedAt`, `endedAt` (integer ms)
-- `status` (text: "success" | "failed")
+- `kind` (text: `"screenshot+dom"` | `"download"` | `"mixed"`)
+- `dir` (text; filesystem path under `~/.minty/captures/<id>/`)
+- `url` (text)
+- `title` (text nullable)
+- `createdAt` (integer ms)
+
+#### `extractions`
+- `id` (text pk)
+- `captureId` (text fk)
+- `model` (text)
+- `provider` (text)
+- `status` (text: `"success" | "failed"`)
 - `error` (text nullable)
-
-#### `transactions`
-
-- `id` (text pk)
-- `userId` (text fk)
-- `accountId` (text fk)
-- `postedAt` (text ISO date `YYYY-MM-DD`)
-- `amount` (integer minor units; negative = expense, positive = income)
-- `currency` (text)
-- `rawDescription` (text)
-- `normalizedMerchant` (text)
-- `category` (text nullable)
-- `categoryConfidence` (real nullable 0..1)
-- `categorySource` (text: "rule" | "llm" | "manual" | "none")
-- `externalId` (text nullable)
-- `hash` (text)
 - `createdAt` (integer ms)
 
-Indexes/constraints:
-
-- unique(accountId, externalId) where externalId is not null
-- unique(accountId, hash)
-
-#### `rules`
-
-- `id` (text pk)
-- `userId` (text fk)
-- `matchType` (text: "contains" | "equals" | "regex")
-- `pattern` (text)
-- `merchantOverride` (text nullable)
-- `category` (text)
-- `priority` (integer)
-- `createdAt` (integer ms)
-
-#### `subscriptions`
-
-- `id` (text pk)
-- `userId` (text fk)
-- `normalizedMerchant` (text)
-- `currency` (text)
-- `period` (text: "weekly" | "monthly" | "annual" | "unknown")
-- `avgAmount` (integer)
-- `confidence` (real)
-- `lastSeenAt` (text YYYY-MM-DD)
-- `nextExpectedAt` (text nullable)
-- `updatedAt` (integer ms)
-
-Unique:
-
-- unique(userId, normalizedMerchant, currency)
+Optional (nice-to-have):
+- store the extracted JSON in DB for reproducibility
 
 ---
 
-## 5) Config & rules format
+## 5) LLM strategy
 
-### `config.json` (per user)
+### Provider choice
 
-Path: `~/.minty/config.json`
+Use **AI SDK** (provider-agnostic), default to **Anthropic Claude** for:
 
-Zod schema fields:
+- strong vision extraction quality
+- reliable structured JSON output when constrained + validated with zod
 
-- `defaultCurrency?: string`
-- `categories?: string[]` (use defaults if missing)
-- `llm`:
-  - `provider`: `"openai" | "anthropic" | "ollama" | "none"`
-  - `model?: string`
-  - `apiKeyEnv?: string` (env var name, e.g. `OPENAI_API_KEY`)
-  - `enabled: boolean`
-- `privacy`:
-  - `sendRawDescriptionToLLM: boolean` (default false)
-  - `sendAmountsToLLM: boolean` (default true)
-  - `sendDatesToLLM: boolean` (default true)
+Support OpenAI as an alternative (config switch).
 
-### Rules storage approach (MVP decision)
+### Privacy defaults
 
-- **DB is source of truth** for rules.
-- Optional command `minty rules export --out rules.json` for sharing.
+- Send only what’s needed (artifacts are sensitive; users opt-in to sending screenshots to LLM)
+- Default: do **not** send raw description if user disables it, but for web capture MVP screenshots are inherently “raw”
+- Always store artifacts locally first so users can inspect what is being sent
 
----
+### Structured output
 
-## 6) CSV ingest details (critical)
+All LLM calls must return strict JSON validated with zod:
 
-### Input format strategy
+**Extraction output:**
+```json
+{
+  "transactions": [
+    {
+      "postedAt": "YYYY-MM-DD",
+      "amount": -1234,
+      "currency": "EUR",
+      "rawDescription": "…",
+      "externalId": "…?"
+    }
+  ]
+}
+```
 
-Support:
+**Categorization output:**
+```json
+{ "category": "Groceries", "confidence": 0.0, "reason": "…" }
+```
 
-- Generic CSV import (header-based)
-- Auto-mapping by common header names
-- Explicit column mapping via flags (fallback when headers are non-standard)
+**Subscription detection output:**
+```json
+{
+  "subscriptions": [
+    { "merchant": "NETFLIX", "period": "monthly", "confidence": 0.9, "avgAmount": 1299 }
+  ]
+}
+```
 
-### Column mapping (canonical)
+### Caching (still “LLM-first”)
 
-Map any CSV to:
+To keep behavior stable and costs down:
 
-- `postedAt`
-- `amount`
-- `currency` (optional; fallback to account currency)
-- `rawDescription`
-- `externalId` (optional)
-
-### Dedupe
-
-Compute stable `hash` if externalId missing:
-
-- `hash = sha256("${postedAt}|${amount}|${currency}|${normalizedRawDesc}|${accountId}")`
-
-Where `normalizedRawDesc` is:
-
-- trimmed
-- whitespace collapsed
-- optionally uppercased
-
-Insert with conflict-ignore semantics.
-
-### Amount parsing
-
-- handle comma decimals (`1.234,56`) and dot decimals (`1,234.56`)
-- store in minor units integer
-- document expected sign convention (if bank exports expenses as positive, allow `--expenses-positive` flag)
+- Cache categorization decisions by `(normalizedMerchant, currency)` with a confidence threshold.
+- Cache extraction results by capture id.
 
 ---
 
-## 7) Merchant normalization pipeline
+## 6) Browser safety (read-only automation)
 
-Goal: deterministic, explainable normalization that helps dedupe + categorization.
+MVP rule: Minty does not attempt to “drive” the bank UI.
 
-Steps:
+- Minty opens a browser and waits for user to navigate.
+- Minty only:
+  - captures artifacts
+  - optionally triggers “download” only if user explicitly confirms (future)
 
-1. Unicode normalize, trim, consistent casing
-2. Collapse whitespace
-3. Remove common noise:
-   - card digit groups
-   - reference IDs (`REF`, `TRX`, `VISA`, etc.)
-4. Apply merchant override (if a matching rule specifies one)
+Hard safety measures (MVP):
 
-Keep it conservative for MVP.
-
----
-
-## 8) Categorization design
-
-### Categories (defaults)
-
-Groceries, Dining, Transport, Utilities, Rent, Subscriptions, Shopping, Health, Travel, Entertainment, Income, Fees, Transfers, Other, Uncategorized
-
-### Rules-first
-
-- Evaluate rules by `priority desc`.
-- match types:
-  - `contains`: substring match
-  - `equals`: exact match (prefer on normalizedMerchant)
-  - `regex`: regex against rawDescription
-
-If rule matches:
-
-- set category
-- confidence = 1.0
-- source = `rule`
-- apply `merchantOverride` if present
-
-### LLM fallback (optional)
-
-Only for remaining Uncategorized:
-
-Prompt must:
-
-- constrain output to known categories
-- require JSON output:
-  - `{ "category": "...", "confidence": 0-1, "reason": "short" }`
-
-Validate via zod.
-Cache by normalizedMerchant (and optionally amount band).
-
-### Manual corrections
-
-`minty txn set-category ... --learn-rule`:
-
-- sets categorySource to `manual`
-- inserts a new rule:
-  - matchType: `equals`
-  - pattern: normalizedMerchant
-  - priority: e.g. 50
+- Allowlist to current origin(s) once session starts (warn on cross-origin navigation)
+- No auto-clicking of buttons/links
+- No form submissions initiated by Minty
 
 ---
 
-## 9) Subscription detection (MVP)
+## 7) Deduping
 
-### Inputs
+If `externalId` is unavailable:
 
-Expense transactions only (amount < 0).
+`hash = sha256("${postedAt}|${amount}|${currency}|${normalizedRawDesc}|${accountId}")`
 
-Group by:
-
-- (userId, normalizedMerchant, currency)
-
-Require:
-
-- ≥ 3 occurrences
-
-Compute:
-
-- sorted dates
-- deltas between consecutive occurrences (days)
-- median delta
-
-Classify:
-
-- weekly if median in [5..9]
-- monthly if median in [25..35]
-- annual if median in [330..400]
-- else unknown
-
-Amount stability:
-
-- coefficient of variation (stddev / mean) on absolute amounts
-- stable if cv ≤ 0.15
-
-Confidence:
-
-- +0.4 if period known
-- +0.3 if stable
-- +0.3 if occurrences ≥ 4
-  Clamp to 0..1
-
-Next expected:
-
-- if period known: lastSeenAt + (7/30/365)
-- else null
-
-Upsert into subscriptions table.
+Insert transactions with conflict-ignore semantics.
 
 ---
 
-## 10) Reporting (MVP)
+## 8) Reporting (MVP)
 
-### Month report
-
-Input: `--month YYYY-MM`
-
-Compute:
-
-- total expenses (sum of negative amounts)
-- total income (sum of positive amounts)
-- totals by category
-- top merchants by spend
-
-Output:
-
-- Chalk headings
-- Simple column formatter (padEnd)
-- Money formatted from minor units
-
-### Uncategorized report
-
-List:
-
-- id, date, merchant, amount, rawDescription snippet
-
-### Subscriptions report
-
-List:
-
-- merchant, period, avg amount, next expected, confidence
+Same as original plan (month totals, uncategorized, merchants, subscriptions).
 
 ---
 
-## 11) Tooling & scripts (package.json)
+## 9) Implementation milestones (agent-executable)
 
-Minimum scripts:
+### Milestone 1 — Project scaffolding (done)
+- TS project + commander CLI entry
+- basic DB + migrations + init
 
-- `dev`: `tsx src/cli/index.ts`
-- `build`: `tsup src/cli/index.ts --format esm --dts`
-- `test`: `vitest run`
-- `test:watch`: `vitest`
-- `db:migrate`: `tsx src/core/db/migrate.ts`
-
-Drizzle migrations:
-
-- Use drizzle-kit (dev dependency) and document the flow.
-
----
-
-## 12) Implementation milestones (agent-executable)
-
-### Milestone 1 — Project scaffolding
-
-- [ ] TS project + tsconfig
-- [ ] commander CLI entry `minty`
-- [ ] `minty --help` shows commands
-- [ ] chalk + ora wrappers
-- [ ] vitest setup
+### Milestone 2 — Browser harness
+- Add Playwright dependency
+- `minty ingest web` opens persistent profile under `~/.minty/browser/`
+- user presses Enter to capture
 
 Acceptance:
+- Browser opens and artifacts are saved under `~/.minty/captures/...`
 
-- `npm run dev -- --help` works.
-
-### Milestone 2 — DB layer
-
-- [ ] Path helpers (`~/.minty/`)
-- [ ] drizzle + better-sqlite3 client init
-- [ ] schema + migrations + migrate runner
-- [ ] `minty init` creates `~/.minty` profile
+### Milestone 3 — LLM extraction
+- AI SDK wiring (provider config)
+- send screenshot + DOM to LLM
+- zod-validate extracted canonical transactions
 
 Acceptance:
+- extraction produces valid JSON for at least one captured page
 
-- init is idempotent.
-
-### Milestone 3 — Accounts
-
-- [ ] accounts CRUD
-- [ ] add/list/remove commands
-
-### Milestone 4 — CSV ingest
-
-- [ ] CSV parser with delimiter detection
-- [ ] format detection + mapping (auto + generic)
-- [ ] normalization + dedupe + inserts
-- [ ] ingest run tracking
+### Milestone 4 — Web ingest to DB
+- create ingest_run with sourceType `"web"`
+- insert extracted transactions with dedupe
 
 Acceptance:
+- ingesting the same capture twice yields 0 new transactions
 
-- importing same file twice adds 0 on second run.
+### Milestone 5 — LLM categorization
+- `minty classify` calls LLM for uncategorized txns
+- cache by normalizedMerchant
 
-### Milestone 5 — Rules + classify
+### Milestone 6 — LLM subscription detection
+- `minty subscriptions detect` calls LLM with recent txn history grouped by merchant
+- store results in `subscriptions`
 
-- [ ] rules CRUD
-- [ ] rules engine
-- [ ] classify orchestrator (rules-first)
-- [ ] `minty classify`
-
-Acceptance:
-
-- added rules change output.
-
-### Milestone 6 — LLM categorizer
-
-- [ ] config zod + env reading
-- [ ] AI SDK provider selection
-- [ ] response validation + caching
-- [ ] `minty classify` uses LLM when enabled
-
-Acceptance:
-
-- without LLM enabled, still works.
-
-### Milestone 7 — Subscriptions
-
-- [ ] detect algorithm
-- [ ] upsert subscriptions
-- [ ] detect + upcoming commands
-
-### Milestone 8 — Reports
-
-- [ ] month report
-- [ ] uncategorized report
-- [ ] merchants report
+### Milestone 7 — Reports
+- month/uncategorized/merchants/subscriptions outputs
 
 ---
 
-## 13) Testing plan (vitest)
+## 10) Testing plan (vitest)
 
-Unit tests:
-
-- normalization
-- CSV parsing quirks
-- dedupe hash stability
-- rules matching
-- subscription detection
-- month aggregation math
-
-Integration test:
-
-- fixture CSV → ingest → classify with rules → subscriptions detect → month totals
-
-Use fixtures under `test/fixtures`.
+- Unit: money/date parsing, normalization, dedupe hash stability
+- Unit: mapping/zod validation for extraction output
+- Integration: fake capture → LLM stubbed → ingest to DB → dedupe behavior
 
 ---
 
-## 14) Error handling & UX rules
+## 11) Deliverables checklist
 
-- Validate CLI args with zod.
-- Print friendly errors; show stack trace only with `--debug`.
-- Use ora spinner for long actions.
-- Never write partial data without wrapping an ingest run (record failed runs too).
-
----
-
-## 15) Privacy & security constraints (MVP)
-
-- Store everything locally.
-- LLM is BYO key; read key from env only.
-- Default privacy: do NOT send rawDescription to LLM unless user enables it.
-- Optional future: `minty profile reset` to wipe local data.
-
----
-
-## 16) Future-proofing for Playwright (design now)
-
-Define an importer interface now:
-
-- `Importer.ingest(ctx): Promise<IngestResult>`
-
-MVP importers:
-
-- CSV
-- JSON
-
-Later:
-
-- Playwright exporter:
-  - persistent browser profile per user
-  - human-in-the-loop auth pause/resume
-  - export-first (download statements instead of scraping tables)
-
-Core ledger pipeline stays unchanged.
-
----
-
-## 17) Deliverables checklist
-
-- [ ] README (install + workflow)
-- [ ] init, accounts, ingest csv, classify, subscriptions detect, report month
+- [ ] README (install + web ingest workflow)
+- [ ] `minty ingest web` + artifacts saved locally
+- [ ] LLM extraction + DB ingest
+- [ ] LLM categorize + subscriptions + reports
 - [ ] tests passing
-- [ ] fixture data included
+

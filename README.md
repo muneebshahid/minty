@@ -4,7 +4,7 @@ Local-first personal finance ledger, built to be scriptable, explainable, and ex
 
 ## Status
 
-Early MVP scaffolding. Implemented today:
+Early MVP scaffolding. Current direction is **Playwright-first web ingest** (generic, human-assisted) with LLM extraction.
 
 - CLI skeleton (commands wired, most are stubs)
 - SQLite schema + lightweight migrations
@@ -61,6 +61,7 @@ Currently implemented:
 Scaffolded (not implemented yet):
 
 - `minty accounts add|list|remove ...`
+- `minty ingest web --account <name>` (Playwright capture + LLM extraction)
 - `minty ingest json ...`
 - `minty classify ...`
 - `minty rules add|export ...`
